@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>风起之书 · Liber Ventorum · demo</title>
+<style>
+  @font-face { font-family: 'LV Serif'; src: url('fonts/LVSerif.ttf'); font-weight: 200 900; }
+  @font-face { font-family: 'LV Latin'; src: url('fonts/LVLatin.ttf'); font-weight: 500; }
+  @font-face { font-family: 'LV Mono';  src: url('fonts/LVMono.ttf');  font-weight: 400; }
+  html, body { margin: 0; background: #0E0C0A; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ───────────────────────── Liber Ventorum 风起之书 · demo (前 464 · 第一次起风) ─────────────────────────
+// Everything is a pure function of t. Timing lives in the tables below.
+const W = innerWidth, H = innerHeight;
+const cv = document.getElementById('c'); cv.width = W; cv.height = H;
+const ctx = cv.getContext('2d');
+
+// ── palette (STYLE.md §3)
+const C = { ground: '#0E0C0A', raised: '#17140F', hair: '#3A3226', paper: '#E8DCC0', paper2: '#9C8F78',
+            gold: '#C9A45C', red: '#A8322A', ink: '#2A1D10' };
+const SERIF = "'LV Serif'", LATIN = "'LV Latin'", MONO = "'LV Mono'";
+
+// ── helpers
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eio = t => { t = clamp(t); return t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; };
+const eo = t => 1 - Math.pow(1 - clamp(t), 3);
+const env = (t, a, b, fi = .35, fo = .35) => Math.min(seg(t, a, a + fi), 1 - seg(t, b - fo, b));
+function mulberry(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const hash = n => { n = Math.sin(n * 127.1 + 311.7) * 43758.5453; return n - Math.floor(n); };
+
+// ── timing (seconds)
+const DUR = 38.2;
+const CAPS = [   // the film's only voice: one line, 1–2 gold keywords
+  { t0: 0.3,  t1: 5.6,  text: '木星和土星，每二十年相遇一次。', gold: ['木星', '土星'] },
+  { t0: 5.8,  t1: 11.1, text: '假如每次起风，你都会醒来一次。', gold: ['起风'] },
+  { t0: 11.3, t1: 17.4, text: '齐国国都的城门边，有一座学宫，叫稷下。', gold: ['稷下'] },
+  { t0: 17.6, t1: 22.5, text: '学者们不用做官，只管议论。', gold: ['只管议论'] },
+  { t0: 23.4, t1: 29.4, text: '荀子说：天行有常，不为尧存，不为桀亡。', gold: ['天行有常'] },
+];
+const YEARS = [  // year stamp keyframes: hold `y` from t, roll to the next between its r0..r1
+  { t: 0,    y: 2026, approx: false, place: '此刻' },
+  { r0: 0.8, r1: 2.8, y: -464, approx: false, place: '天秤座 · 木星土星相遇' },
+  { r0: 10.2, r1: 11.5, y: -300, approx: true, place: '齐 · 临淄 · 稷下' },
+];
+const STAMP_OFF = [30.2, 30.6];
+const SOURCES = [
+  { t0: 11.6, t1: 22.4, text: '《史记·田敬仲完世家》' },
+  { t0: 23.7, t1: 29.6, text: '《荀子·天论》' },
+];
+const T_MEET = 5.6;
+const EV = [ { t: T_MEET, type: 'wind' }, { t: 11.6, type: 'seal' }, { t: 14.3, type: 'light' },
+             { t: 23.7, type: 'seal' }, { t: 24.0, type: 'light' } ];
+
+// ── static layers (seeded, built once)
+const fibre = document.createElement('canvas'); fibre.width = W; fibre.height = H;
+{ const g = fibre.getContext('2d'), r = mulberry(7);
+  for (let i = 0; i < 2600; i++) { const x = r() * W, y = r() * H, a = r() * Math.PI, l = 6 + r() * 26;
+    g.strokeStyle = r() < .5 ? 'rgba(232,220,192,0.05)' : 'rgba(0,0,0,0.10)'; g.lineWidth = .6 + r() * .6;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l * .25); g.stroke(); } }
+
+const STARS = []; { const r = mulberry(464);
+  for (let i = 0; i < 900; i++) { const m = r(); STARS.push({ x: r() * W, y: r() * 900, s: m < .8 ? .7 + r() * .6 : m < .97 ? 1.3 + r() * .7 : 2.1 + r() * .8,
+    a: .25 + r() * .55, ph: r() * 6.28 }); } }
+
+// ecliptic: a gentle arc across the sky
+const ECL = { p0: [-120, 760], c: [960, 380], p1: [2040, 640] };
+const eclAt = u => { const v = 1 - u; return [v * v * ECL.p0[0] + 2 * v * u * ECL.c[0] + u * u * ECL.p1[0], v * v * ECL.p0[1] + 2 * v * u * ECL.c[1] + u * u * ECL.p1[1]]; };
+const U_MEET = .52;
+
+// ── bamboo slips
+const SCROLL1 = { cx: 1010, top: 236, cw: 46, gap: 12, sw: 70, chars: 9, lines: [
+  '宣王喜文学游说之士', '自如驺衍淳于髡田骈', '接予慎到环渊之徒', '七十六人皆赐列第', '为上大夫不治而议论', '是以齐稷下学士复盛', '且数百千人', '', '' ],
+  lit: { line: 4, from: 4, to: 8, t0: 14.3, dt: .22 } };
+const SCROLL2 = { cx: 980, top: 236, cw: 54, gap: 14, sw: 84, chars: 6, lines: [
+  '天行有常', '不为尧存', '不为桀亡', '应之以治则吉', '应之以乱则凶', '' ],
+  lit: { line: 0, from: 0, to: 3, t0: 24.0, dt: .19, through: 2 } };
+function slipGeom(S) {
+  const n = S.lines.length, h = S.chars * (S.cw + 8) + 96, total = n * S.sw + (n - 1) * S.gap;
+  const x0 = S.cx + total / 2;   // slip 0 is the rightmost (reading order right → left)
+  return { n, h, total, xs: S.lines.map((_, i) => x0 - S.sw - i * (S.sw + S.gap)) };
+}
+function drawSlips(g, S, t, alpha, glowOnly = 0) {
+  const G = slipGeom(S), r = mulberry(11);
+  g.save(); g.globalAlpha = alpha;
+  // cast shadow of the whole bundle
+  g.save(); g.shadowColor = 'rgba(0,0,0,0.65)'; g.shadowBlur = 40; g.shadowOffsetX = 18; g.shadowOffsetY = 22;
+  g.fillStyle = '#000'; g.fillRect(G.xs[G.n - 1], S.top, G.total, G.h); g.restore();
+  for (let i = 0; i < G.n; i++) {
+    const x = G.xs[i], y = S.top + (hash(i * 3.1) - .5) * 6;
+    // aged bamboo: darker at the edges, lit from the upper left
+    const gr = g.createLinearGradient(x, 0, x + S.sw, 0);
+    gr.addColorStop(0, '#4a3520'); gr.addColorStop(.18, '#6e5233'); gr.addColorStop(.6, '#7a5c39'); gr.addColorStop(1, '#3b2a18');
+    g.fillStyle = gr; g.beginPath(); g.roundRect(x, y, S.sw, G.h, 4); g.fill();
+    const lit = g.createLinearGradient(0, y, 0, y + G.h);
+    lit.addColorStop(0, 'rgba(255,214,150,0.16)'); lit.addColorStop(.5, 'rgba(255,214,150,0.03)'); lit.addColorStop(1, 'rgba(0,0,0,0.28)');
+    g.fillStyle = lit; g.fill();
+    // fibres
+    g.lineWidth = .7;
+    for (let k = 0; k < 14; k++) { const fx = x + 4 + r() * (S.sw - 8); g.strokeStyle = `rgba(${r() < .5 ? '20,12,4' : '210,170,110'},${.08 + r() * .08})`;
+      g.beginPath(); g.moveTo(fx, y + 6); g.lineTo(fx + (r() - .5) * 2, y + G.h - 6); g.stroke(); }
+    // gold rim on the lit edge
+    g.strokeStyle = 'rgba(201,164,92,0.35)'; g.lineWidth = 1; g.beginPath(); g.moveTo(x + 1, y + 3); g.lineTo(x + 1, y + G.h - 3); g.stroke();
+    // characters, top to bottom
+    const L = S.lines[i];
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `600 ${S.cw}px ${SERIF}`;
+    for (let k = 0; k < L.length; k++) {
+      const cy = y + 62 + k * (S.cw + 8) + S.cw / 2, cx = x + S.sw / 2;
+      let on = 0; const Lt = S.lit;
+      const last = Lt.through ?? Lt.line;
+      if (i >= Lt.line && i <= last) {
+        const idx = (i - Lt.line) * 100 + k, startIdx = Lt.from, inRange = (i > Lt.line || k >= Lt.from) && (i < last || k <= Lt.to);
+        const order = i === Lt.line ? k - Lt.from : (i - Lt.line) * 4 + k - Lt.from;   // reading order across slips
+        if (inRange) on = eo(seg(t, Lt.t0 + order * Lt.dt, Lt.t0 + order * Lt.dt + .35));
+      }
+      if (glowOnly && !on) continue;
+      if (on > 0) { g.save(); g.shadowColor = 'rgba(226,190,114,0.9)'; g.shadowBlur = 18 * on; g.fillStyle = `rgba(226,190,114,${on})`; g.fillText(L[k], cx, cy); g.restore(); }
+      if (on < 1) { g.fillStyle = `rgba(22,14,6,${.82 * (1 - on)})`; g.fillText(L[k], cx, cy); }
+    }
+  }
+  // two binding cords
+  for (const fy of [S.top + 30, S.top + G.h - 30]) {
+    g.strokeStyle = '#2b2015'; g.lineWidth = 4; g.beginPath(); g.moveTo(G.xs[G.n - 1] - 10, fy); g.lineTo(G.xs[0] + S.sw + 14, fy + 2); g.stroke();
+    g.strokeStyle = 'rgba(201,164,92,0.25)'; g.lineWidth = 1; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(G.xs[G.n - 1] - 10, fy - 1); g.lineTo(G.xs[0] + S.sw + 14, fy + 1); g.stroke(); g.setLineDash([]);
+  }
+  g.restore();
+}
+const charPos = (S, line, k) => { const G = slipGeom(S); return [G.xs[line] + S.sw / 2, S.top + 62 + k * (S.cw + 8) + S.cw / 2]; };
+
+// wind particles: sources (stars + planets) → targets (points on scroll 1)
+const NP = 1300, PART = []; {
+  const r = mulberry(2026), G = slipGeom(SCROLL1), [mx, my] = eclAt(U_MEET);
+  for (let i = 0; i < NP; i++) {
+    let sx, sy; if (i < 900) { sx = STARS[i].x; sy = STARS[i].y; } else { const a = r() * 6.28, d = r() * 90; sx = mx + Math.cos(a) * d; sy = my + Math.sin(a) * d; }
+    const j = Math.floor(r() * G.n), tx = G.xs[j] + r() * SCROLL1.sw, ty = SCROLL1.top + r() * G.h;
+    PART.push({ sx, sy, tx, ty, d: (i < 900 ? Math.hypot(sx - mx, sy - my) / 1400 : r() * .15) * 1.1 + r() * .25, ph: r() * 6.28, amp: 40 + r() * 120, gold: r() < .35 });
+  }
+}
+
+// ── drawing parts
+function ground(lamp = 1) {
+  ctx.fillStyle = C.ground; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W * .52, H * .46, 60, W * .52, H * .46, 1150);
+  g.addColorStop(0, `rgba(40,32,22,${.9 * lamp})`); g.addColorStop(.55, 'rgba(14,12,10,0)'); g.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(fibre, 0, 0);
+}
+function dim(a) { if (a <= 0) return; ctx.fillStyle = `rgba(8,6,4,${clamp(a)})`; ctx.fillRect(0, 0, W, H); }
+
+function yearAt(t) {   // → {v (float), approx, place, placePrev, placeMix}
+  let cur = YEARS[0], v = cur.y, approx = cur.approx, place = cur.place, prev = place, mix = 1;
+  for (let i = 1; i < YEARS.length; i++) { const k = YEARS[i]; if (t < k.r0) break;
+    const p = eio(seg(t, k.r0, k.r1)); v = lerp(cur.y, k.y, p); prev = cur.place; place = k.place; mix = seg(t, k.r0 + .2, k.r1);
+    approx = p > .5 ? k.approx : cur.approx; if (p >= 1) cur = k; }
+  return { v, approx, place, prev, mix };
+}
+function yearStamp(t) {
+  const a = 1 - seg(t, STAMP_OFF[0], STAMP_OFF[1]); if (a <= 0) return;
+  const { v, approx, place, prev, mix } = yearAt(t), neg = v < 0, av = Math.abs(v);
+  ctx.save(); ctx.globalAlpha = a; ctx.textBaseline = 'alphabetic';
+  const X = 64, Y = 100, fs = 46, lh = 52;
+  ctx.font = `600 ${fs}px ${SERIF}`; ctx.fillStyle = C.paper; ctx.textAlign = 'left';
+  // prefix (约 / 前), cross-fading with the sign
+  let x = X; const pre = (approx ? '约' : '') + (neg ? '前' : '');
+  if (pre) { ctx.globalAlpha = a * clamp(neg ? seg(-v, 0, 30) : 1); ctx.fillText(pre, x, Y); x += ctx.measureText(pre).width + 12; ctx.globalAlpha = a; }
+  // odometer digits
+  const nd = Math.max(1, String(Math.floor(av + 1e-6)).length), dw = ctx.measureText('0').width + 2;
+  ctx.save(); ctx.beginPath(); ctx.rect(x - 4, Y - fs - 4, nd * dw + 8, lh + 10); ctx.clip();
+  for (let k = nd - 1; k >= 0; k--) {
+    const p = Math.pow(10, k), pos = av / p, d = Math.floor(pos) % 10;
+    const frac = k === 0 ? av - Math.floor(av) : clamp((av % p) - (p - 1));
+    const cx = x + (nd - 1 - k) * dw;
+    ctx.fillText(String(d), cx, Y - frac * lh); ctx.fillText(String((d + 1) % 10), cx, Y + (1 - frac) * lh);
+  }
+  ctx.restore();
+  // place line
+  ctx.font = `400 22px ${SERIF}`;
+  if (mix < 1) { ctx.globalAlpha = a * (1 - mix); ctx.fillStyle = C.paper2; ctx.fillText(prev, X, Y + 38); }
+  ctx.globalAlpha = a * mix; ctx.fillStyle = C.paper2; ctx.fillText(place, X, Y + 38);
+  ctx.restore();
+}
+function seal(x, y, s, a) {   // 白文 seal "风起": red square, characters cut out
+  ctx.save(); ctx.globalAlpha = a; ctx.translate(x + s / 2, y + s / 2); ctx.rotate(-.035);
+  const r = mulberry(88); ctx.beginPath();
+  const pts = []; for (let i = 0; i < 24; i++) { const side = Math.floor(i / 6), u = (i % 6) / 6, j = (r() - .5) * 2.2;
+    const p = side === 0 ? [-s / 2 + u * s, -s / 2 + j] : side === 1 ? [s / 2 + j, -s / 2 + u * s] : side === 2 ? [s / 2 - u * s, s / 2 + j] : [-s / 2 + j, s / 2 - u * s]; pts.push(p); }
+  pts.forEach((p, i) => i ? ctx.lineTo(...p) : ctx.moveTo(...p)); ctx.closePath(); ctx.fillStyle = C.red; ctx.fill();
+  ctx.fillStyle = '#F0E2C4'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `800 ${s * .42}px ${SERIF}`;
+  ctx.fillText('风', 0, -s * .22); ctx.fillText('起', 0, s * .24);
+  for (let i = 0; i < 26; i++) { ctx.fillStyle = r() < .5 ? C.red : 'rgba(240,226,196,.6)'; ctx.fillRect((r() - .5) * s * .9, (r() - .5) * s * .9, 1.4, 1.4); }
+  ctx.restore();
+}
+function sourceCard(t) {
+  for (const S of SOURCES) { const a = env(t, S.t0, S.t1, .4, .3); if (a <= 0) continue;
+    ctx.save(); ctx.globalAlpha = a; ctx.font = `500 28px ${SERIF}`; ctx.fillStyle = C.paper; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+    const sx = W - 64 - 44; ctx.fillText(S.text, sx - 16, 92); ctx.restore();
+    seal(sx, 58, 44, a); }
+}
+function caption(t) {
+  for (const c of CAPS) { const a = env(t, c.t0, c.t1); if (a <= 0) continue;
+    ctx.save(); ctx.globalAlpha = a; ctx.font = `500 40px ${SERIF}`; ctx.textBaseline = 'alphabetic';
+    ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 2;
+    // split into gold / paper runs
+    const runs = []; let s = c.text;
+    while (s.length) { let hit = null, at = s.length; for (const k of c.gold) { const i = s.indexOf(k); if (i >= 0 && i < at) { at = i; hit = k; } }
+      if (at > 0) runs.push([s.slice(0, at), C.paper]); if (hit) runs.push([hit, C.gold]); s = hit ? s.slice(at + hit.length) : ''; }
+    const w = runs.reduce((m, [x]) => m + ctx.measureText(x).width, 0); let x = (W - w) / 2;
+    for (const [txt, col] of runs) { ctx.fillStyle = col; ctx.fillText(txt, x, 1000); x += ctx.measureText(txt).width; }
+    ctx.restore(); }
+}
+function sky(t, fade) {
+  if (fade <= 0) return;
+  ctx.save(); ctx.globalAlpha = fade;
+  for (let i = 0; i < STARS.length; i++) { const s = STARS[i];
+    const leave = PART[i] ? seg(t, T_MEET + .1 + PART[i].d, T_MEET + .25 + PART[i].d) : 0; if (leave >= 1) continue;
+    ctx.globalAlpha = fade * s.a * (.75 + .25 * Math.sin(t * 1.3 + s.ph)) * (1 - leave);
+    ctx.fillStyle = s.s > 2 ? '#F3E6C6' : C.paper; ctx.beginPath(); ctx.arc(s.x, s.y, s.s, 0, 6.283); ctx.fill(); }
+  ctx.globalAlpha = fade;
+  // ecliptic + sign ticks
+  ctx.strokeStyle = 'rgba(232,220,192,0.28)'; ctx.lineWidth = 1.2; ctx.beginPath();
+  for (let u = 0; u <= 1.0001; u += .01) { const [x, y] = eclAt(u); u ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.stroke();
+  for (const u of [.18, .35, .69, .86]) { const [x, y] = eclAt(u); ctx.strokeStyle = 'rgba(232,220,192,0.35)'; ctx.beginPath(); ctx.moveTo(x, y - 14); ctx.lineTo(x, y + 14); ctx.stroke(); }
+  { const [x, y] = eclAt(U_MEET); ctx.font = `400 22px ${SERIF}`; ctx.fillStyle = 'rgba(232,220,192,0.55)'; ctx.textAlign = 'center';
+    ctx.fillText('天秤座', x, y + 62); ctx.font = `400 15px ${SERIF}`; ctx.fillStyle = 'rgba(156,143,120,0.6)'; ctx.fillText('示意', x, y + 86); }
+  // planets
+  const p = eio(seg(t, 0, T_MEET)), uj = lerp(.2, U_MEET, p), us = lerp(.43, U_MEET, p);
+  const gone = seg(t, T_MEET + .2, T_MEET + .9);
+  const planet = (u, r, col, ring) => { const [x, y] = eclAt(u);
+    const gl = ctx.createRadialGradient(x, y, 0, x, y, r * 6); gl.addColorStop(0, col.replace('A', '.45')); gl.addColorStop(1, col.replace('A', '0'));
+    ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(x, y, r * 6, 0, 6.283); ctx.fill();
+    ctx.fillStyle = col.replace('A', '1'); ctx.beginPath(); ctx.arc(x, y, r, 0, 6.283); ctx.fill();
+    if (ring) { ctx.strokeStyle = col.replace('A', '.8'); ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(x, y, r * 2.1, r * .7, -.35, 0, 6.283); ctx.stroke(); } };
+  ctx.globalAlpha = fade * (1 - gone);
+  planet(us, 6, 'rgba(222,200,150,A)', true); planet(uj, 8, 'rgba(201,164,92,A)', false);
+  // name tags, then the readout
+  const tagA = env(t, .6, 4.6, .5, .5);
+  if (tagA > 0) { ctx.globalAlpha = fade * tagA * (1 - gone); ctx.font = `400 20px ${SERIF}`; ctx.textAlign = 'center'; ctx.fillStyle = C.paper2;
+    const [jx, jy] = eclAt(uj), [sx, sy] = eclAt(us); ctx.fillText('木星', jx, jy - 30); ctx.fillText('土星', sx, sy - 30); }
+  const ra = env(t, 3.0, T_MEET + 1.0, .4, .4);
+  if (ra > 0) { const [x, y] = eclAt(U_MEET); ctx.globalAlpha = fade * ra; ctx.font = `400 26px ${MONO}`; ctx.fillStyle = C.gold; ctx.textAlign = 'center';
+    ctx.fillText('天秤 3.9°', x, y - 64); }
+  ctx.restore();
+}
+function wind(t) {
+  const t0 = T_MEET + .1; if (t < t0 - .2 || t > 10.2) return;
+  const [mx, my] = eclAt(U_MEET);
+  // bloom (gold, never white)
+  const b = Math.min(seg(t, T_MEET - .3, T_MEET + .25), 1 - seg(t, T_MEET + .4, T_MEET + 1.8));
+  if (b > 0) { const g = ctx.createRadialGradient(mx, my, 0, mx, my, 520); g.addColorStop(0, `rgba(226,190,114,${.55 * b})`); g.addColorStop(.3, `rgba(201,164,92,${.18 * b})`); g.addColorStop(1, 'rgba(201,164,92,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (const q of PART) {
+    const p = eo(seg(t, t0 + q.d, t0 + q.d + 2.4)); if (p <= 0 || p >= 1) continue;
+    const pos = u => { const cx = lerp(q.sx, q.tx, .5) + 520, cy = lerp(q.sy, q.ty, .5) - 260;   // the gust bends right and up, then settles
+      const v = 1 - u, x = v * v * q.sx + 2 * v * u * cx + u * u * q.tx, y = v * v * q.sy + 2 * v * u * cy + u * u * q.ty, s = Math.sin(Math.PI * u);
+      return [x + Math.sin(u * 9 + q.ph) * q.amp * s * .35, y + Math.cos(u * 7 + q.ph) * q.amp * s * .25]; };
+    const [x, y] = pos(p), [px, py] = pos(Math.max(0, p - .035));
+    const a = Math.sin(Math.PI * p) * .9 + .1, fadeEnd = 1 - seg(p, .86, 1);
+    ctx.strokeStyle = q.gold ? `rgba(226,190,114,${.55 * a * fadeEnd})` : `rgba(232,220,192,${.4 * a * fadeEnd})`;
+    ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(x, y); ctx.stroke(); }
+  ctx.restore();
+}
+const layer = document.createElement('canvas'); layer.width = W; layer.height = H; const lg = layer.getContext('2d');
+function loupe(t, S, line, kFrom, kTo, tin, tout) {
+  const a = env(t, tin, tout, .5, .5); if (a <= 0) return;
+  const [ax, ay] = charPos(S, line, kFrom), [bx, by] = charPos(S, line, kTo), tx = (ax + bx) / 2, ty = (ay + by) / 2;
+  const p = eio(seg(t, tin, tin + 1.2)), lx = lerp(tx + 420, tx, p), ly = lerp(ty - 160, ty, p) + Math.sin(t * .7) * 4, R = 165, M = 1.6;
+  ctx.save(); ctx.globalAlpha = a;
+  // lens shadow
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.7)'; ctx.shadowBlur = 36; ctx.shadowOffsetX = 16; ctx.shadowOffsetY = 20; ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.arc(lx, ly, R + 10, 0, 6.283); ctx.fill(); ctx.restore();
+  ctx.save(); ctx.beginPath(); ctx.arc(lx, ly, R, 0, 6.283); ctx.clip();
+  ctx.fillStyle = C.ground; ctx.fillRect(lx - R, ly - R, 2 * R, 2 * R);
+  ctx.translate(lx, ly); ctx.scale(M, M); ctx.translate(-lx, -ly); ctx.drawImage(layer, 0, 0); ctx.restore();
+  // glass sheen + ring
+  const gs = ctx.createLinearGradient(lx - R, ly - R, lx + R, ly + R); gs.addColorStop(0, 'rgba(255,240,210,.10)'); gs.addColorStop(.5, 'rgba(255,240,210,0)'); gs.addColorStop(1, 'rgba(0,0,0,.18)');
+  ctx.fillStyle = gs; ctx.beginPath(); ctx.arc(lx, ly, R, 0, 6.283); ctx.fill();
+  ctx.lineWidth = 16; ctx.strokeStyle = '#0b0907'; ctx.beginPath(); ctx.arc(lx, ly, R + 8, 0, 6.283); ctx.stroke();
+  ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(201,164,92,.75)'; ctx.beginPath(); ctx.arc(lx, ly, R + 16, 0, 6.283); ctx.stroke();
+  ctx.strokeStyle = 'rgba(201,164,92,.45)'; ctx.beginPath(); ctx.arc(lx, ly, R, 0, 6.283); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,236,200,.35)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(lx, ly, R + 8, 3.6, 4.6); ctx.stroke();
+  ctx.restore();
+}
+function endCard(t) {
+  const a = seg(t, 30.6, 31.4); if (a <= 0) return;
+  ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.globalAlpha = a; ctx.font = `500 30px ${LATIN}`; ctx.fillStyle = C.gold; ctx.letterSpacing = '6px'; ctx.fillText('LIBER VENTORUM', W / 2, 400);
+  ctx.letterSpacing = '0px'; ctx.font = `900 88px ${SERIF}`; ctx.fillStyle = C.paper; ctx.fillText('风起之书', W / 2, 510);
+  ctx.globalAlpha = seg(t, 31.0, 31.7); ctx.font = `500 40px ${SERIF}`; ctx.fillStyle = C.paper; ctx.fillText('借你一阵风，看看你会成为谁。', W / 2, 620);
+  ctx.globalAlpha = seg(t, 31.2, 31.9); ctx.font = `400 22px ${SERIF}`; ctx.fillStyle = C.paper2; ctx.fillText('《史记·田敬仲完世家》  《荀子·天论》', W / 2, 760);
+  ctx.font = `400 18px ${SERIF}`; ctx.fillText('风象时代为西方占星说法，本片只作一面镜子 · 画面为 AI 生成动画', W / 2, 1000);
+  ctx.restore();
+}
+
+// ── the frame
+window.render = (t) => {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const lamp = 1 - seg(t, 22.6, 23.1) + seg(t, 23.1, 23.8) * 1 - seg(t, 29.2, 30.4) * .9;
+  ground(clamp(lamp, .1, 1));
+  // sky (fades as the wind takes it)
+  sky(t, 1 - seg(t, T_MEET + 1.2, T_MEET + 3.4));
+  // scroll 1: settles from the wind, slow push
+  const a1 = eo(seg(t, 8.0, 9.8)) * (1 - seg(t, 22.5, 23.0));
+  if (a1 > 0) { lg.clearRect(0, 0, W, H); const z = lerp(1, 1.06, seg(t, 8, 22.6));
+    lg.save(); lg.translate(1010, 520); lg.scale(z, z); lg.translate(-1010, -520); drawSlips(lg, SCROLL1, t, 1); lg.restore();
+    ctx.save(); ctx.globalAlpha = a1; ctx.drawImage(layer, 0, 0); ctx.restore();
+    loupe(t, SCROLL1, 4, 4, 8, 12.9, 22.1); }
+  wind(t);
+  // scroll 2: light up after a dark-down; at the end only it keeps glowing ("what was left")
+  const a2 = eo(seg(t, 23.1, 24.0));
+  if (a2 > 0) { lg.clearRect(0, 0, W, H); const z = lerp(1.0, 1.05, seg(t, 23.1, 30.2));
+    lg.save(); lg.translate(980, 520); lg.scale(z, z); lg.translate(-980, -520); drawSlips(lg, SCROLL2, t, 1); lg.restore();
+    const fadeOut = 1 - seg(t, 29.4, 30.4) * .82, gone = 1 - seg(t, 30.4, 31.0);
+    ctx.save(); ctx.globalAlpha = a2 * fadeOut * gone; ctx.drawImage(layer, 0, 0); ctx.restore(); }
+  dim(Math.max(seg(t, 22.5, 22.8) * (1 - seg(t, 23.0, 23.4)) * .9, seg(t, 30.4, 31.0) * .6));
+  yearStamp(t); sourceCard(t); caption(t); endCard(t);
+  ctx.fillStyle = `rgba(0,0,0,${1 - seg(t, 0, .4)})`; ctx.fillRect(0, 0, W, H);       // open from black
+  ctx.fillStyle = `rgba(0,0,0,${seg(t, DUR - .6, DUR)})`; ctx.fillRect(0, 0, W, H);   // close to black
+};
+
+// ── texts for readcheck (counters exempt: the year stamp digits)
+window.TEXTS = (t) => {
+  const out = [], box = (id, text, x0, y0, x1, y1) => out.push({ id, text, x0, y0, x1, y1 });
+  for (const c of CAPS) if (t >= c.t0 + .35 && t <= c.t1 - .35) box('cap' + c.t0, c.text, 210, 955, 1710, 1015);
+  for (const s of SOURCES) if (t >= s.t0 + .4 && t <= s.t1 - .3) box('src' + s.t0, s.text, 1300, 60, 1856, 104);
+  if (t >= 3.4 && t <= T_MEET + .6) box('readout', '天秤 3.9°', 900, 340, 1100, 380);
+  if (t >= 31.4 && t <= DUR - .6) box('title', '风起之书', 760, 420, 1160, 520);
+  if (t >= 31.7 && t <= DUR - .6) box('slogan', '借你一阵风，看看你会成为谁。', 660, 580, 1260, 630);
+  return out;
+};
+window.DUR = DUR; window.EV = EV;
+Promise.all([
+  document.fonts.load(`500 40px ${SERIF}`, '风起之书'), document.fonts.load(`900 88px ${SERIF}`, '风'),
+  document.fonts.load(`500 30px ${LATIN}`, 'LIBER'), document.fonts.load(`400 26px ${MONO}`, '3.9°'),
+]).then(() => { window.render(0); window.READY = true; });
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+ "slug": "liber-ventorum",
+ "en": "Liber Ventorum",
+ "cn": "风起之书",
+ "based_on": "visual-investigation",
+ "borrows": ["archive-lighttable", "dataviz"],
+ "line": "Code-drawn objects under one lamp, a rolling year stamp and a sealed source card; when Jupiter and Saturn meet, the wind blows one era into the next.",
+ "line_cn": "一盏灯下的器物、滚动的年份路标、盖印的出处卡；木星土星相遇，一阵风把一个时代吹进下一个时代。",
+ "fps": 24,
+ "audio": "silent"
+}

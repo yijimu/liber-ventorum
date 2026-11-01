@@ -1,0 +1,10 @@
+Liber Ventorum 风起之书 — demo credits
+
+Picture: drawn in code (Canvas 2D), rendered with the Lemo-Opuscar tools (MIT, github.com/lemomo-ai/lemo-opuscar).
+Fonts (SIL Open Font License 1.1, subset):
+  Noto Serif SC — Google / Adobe, github.com/google/fonts (ofl/notoserifsc)
+  Cormorant SC — Christian Thalmann, github.com/google/fonts (ofl/cormorantsc)
+  IBM Plex Mono — IBM, github.com/google/fonts (ofl/ibmplexmono)
+Planet positions: PyEphem (LGPL), computed by the author.
+Texts: 《史记·田敬仲完世家》, 《荀子·天论》 (public domain).
+Sound: none (silent master).
